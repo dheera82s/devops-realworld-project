@@ -288,9 +288,7 @@ resource "aws_iam_role" "github_actions" {
             "token.actions.githubusercontent.com:sub" = "repo:dheera82s@233401180/devops-realworld-project@1361224953:ref:refs/heads/master"
           }
 
-          StringLike = {
-            "token.actions.githubusercontent.com:sub" = "repo:dheera82s/devops-realworld-project:ref:refs/heads/master"
-          }
+
         }
       }
     ]
