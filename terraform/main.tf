@@ -4,10 +4,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
-     tls = {
-    source  = "hashicorp/tls"
-    version = "~> 4.0"
-  }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
   }
 
   required_version = ">= 1.14.0"
@@ -108,6 +108,10 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
 resource "aws_eks_cluster" "main" {
   name     = "devops-realworld-eks"
   role_arn = aws_iam_role.eks_cluster.arn
+  access_config {
+    authentication_mode                         = "API_AND_CONFIG_MAP"
+    bootstrap_cluster_creator_admin_permissions = true
+  }
 
   vpc_config {
     subnet_ids = [
@@ -241,4 +245,93 @@ resource "aws_eks_addon" "ebs_csi" {
   depends_on = [
     aws_iam_role_policy_attachment.ebs_csi
   ]
+}
+
+# GitHub Actions OIDC Provider
+
+data "tls_certificate" "github_actions" {
+  url = "https://token.actions.githubusercontent.com"
+}
+
+resource "aws_iam_openid_connect_provider" "github_actions" {
+  url = "https://token.actions.githubusercontent.com"
+
+  client_id_list = [
+    "sts.amazonaws.com"
+  ]
+
+  thumbprint_list = [
+    data.tls_certificate.github_actions.certificates[0].sha1_fingerprint
+  ]
+}
+
+# IAM Role for GitHub Actions
+
+resource "aws_iam_role" "github_actions" {
+  name = "devops-github-actions-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Effect = "Allow"
+
+        Principal = {
+          Federated = aws_iam_openid_connect_provider.github_actions.arn
+        }
+
+        Action = "sts:AssumeRoleWithWebIdentity"
+
+        Condition = {
+          StringEquals = {
+            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+          }
+
+          StringLike = {
+            "token.actions.githubusercontent.com:sub" = "repo:dheera82s/devops-realworld-project:ref:refs/heads/master"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# Allow GitHub Actions to describe the EKS cluster
+
+resource "aws_iam_role_policy" "github_actions_eks" {
+  name = "github-actions-eks-policy"
+  role = aws_iam_role.github_actions.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Effect = "Allow"
+
+        Action = [
+          "eks:DescribeCluster"
+        ]
+
+        Resource = aws_eks_cluster.main.arn
+      }
+    ]
+  })
+}
+
+resource "aws_eks_access_entry" "github_actions" {
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = aws_iam_role.github_actions.arn
+  type          = "STANDARD"
+}
+
+resource "aws_eks_access_policy_association" "github_actions" {
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = aws_iam_role.github_actions.arn
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
 }

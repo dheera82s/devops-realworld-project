@@ -1,9 +1,13 @@
-name: CI - Build and Push Docker Images
+name: CI/CD - Build, Push and Deploy
 
 on:
   push:
     branches:
       - master
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   docker-build-push:
@@ -32,3 +36,33 @@ jobs:
           context: ./frontend
           push: true
           tags: dheera4610/devops-frontend:${{ github.sha }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ap-south-1
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ap-south-1 \
+            --name devops-realworld-eks
+
+      - name: Deploy Backend
+        run: |
+          kubectl set image deployment/backend \
+            backend=dheera4610/devops-backend:${{ github.sha }}
+
+      - name: Deploy Frontend
+        run: |
+          kubectl set image deployment/frontend \
+            frontend=dheera4610/devops-frontend:${{ github.sha }}
+
+      - name: Verify Backend rollout
+        run: |
+          kubectl rollout status deployment/backend --timeout=180s
+
+      - name: Verify Frontend rollout
+        run: |
+          kubectl rollout status deployment/frontend --timeout=180s
